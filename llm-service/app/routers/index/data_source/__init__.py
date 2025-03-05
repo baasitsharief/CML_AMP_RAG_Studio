@@ -35,12 +35,13 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_utils.cbv import cbv
 from llama_index.core.llms import LLM
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.node_parser import TokenTextSplitter, SentenceSplitter
 from pydantic import BaseModel
 
 from .... import exceptions
 from ....ai.indexing.base import NotSupportedFileExtensionError
 from ....ai.indexing.embedding_indexer import EmbeddingIndexer
+from ....ai.indexing.parser.chunker import ClusterSemanticChunker
 from ....ai.indexing.summary_indexer import SummaryIndexer
 from ....ai.vector_stores.qdrant import QdrantVectorStore
 from ....ai.vector_stores.vector_store import VectorStore
@@ -160,13 +161,10 @@ class DataSourceController:
                 llm = models.LLM.get(datasource.summarization_model)
             indexer = EmbeddingIndexer(
                 datasource.id,
-                splitter=SentenceSplitter(
-                    chunk_size=request.configuration.chunk_size,
-                    chunk_overlap=int(
-                        request.configuration.chunk_overlap
-                        * 0.01
-                        * request.configuration.chunk_size
-                    ),
+                splitter=ClusterSemanticChunker(
+                    embedding_function=models.Embedding.get(
+                        datasource.embedding_model
+                    ).get_text_embedding_batch,
                 ),
                 embedding_model=models.Embedding.get(datasource.embedding_model),
                 llm=llm,
