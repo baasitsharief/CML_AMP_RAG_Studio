@@ -39,20 +39,26 @@ class ClusterSemanticChunker(TextSplitter, BaseModel):
         min_chunk_size (int): The minimum size of the chunk.
     """
 
-    splitter: SentenceSplitter = Field(
-        default_factory=lambda: SentenceSplitter(chunk_size=50, chunk_overlap=0)
+    splitter: TextSplitter = Field(
+        default_factory=lambda: SentenceSplitter(chunk_size=64, chunk_overlap=0)
     )
-    _chunk_size: int = 400
-    max_cluster: int = Field(default_factory=lambda: 400 // 50)
+    _chunk_size: int = 512
+    max_cluster: int = Field(default_factory=lambda: 512 // 64)
     embedding_function: Optional[Any] = Field(
         default_factory=lambda: BedrockEmbedding(
             model_name="cohere.embed-english-v3"
         ).get_text_embedding_batch
     )
 
-    def __init__(self, embedding_function=None, max_chunk_size=400, min_chunk_size=50):
+    def __init__(
+        self,
+        splitter=None,
+        embedding_function=None,
+        max_chunk_size=512,
+        min_chunk_size=64,
+    ):
         super().__init__()
-        self.splitter = SentenceSplitter(
+        self.splitter = splitter or SentenceSplitter(
             chunk_size=min_chunk_size,
             chunk_overlap=0,
         )
@@ -141,22 +147,23 @@ class ClusterSemanticChunker(TextSplitter, BaseModel):
         return docs
 
 
+# Very iffy on this one. It might or might not improve results
 class LLMSemanticChunker(TextSplitter, BaseModel):
     """
     LLMSemanticChunker is a class designed to split text into thematically consistent sections based on suggestions from a Language Model (LLM).
 
     Args:
-        splitter (SentenceSplitter, optional): The sentence splitter to split the text into sentences. Defaults to SentenceSplitter(chunk_size=50, chunk_overlap=0).
+        splitter (TextSplitter, optional): The sentence splitter to split the text into sentences. Defaults to SentenceSplitter(chunk_size=50, chunk_overlap=0).
         llm (LLM, optional): The LLM model to use for the chunking. Defaults to BedrockConverse(model="meta.llama3-1-70b-instruct-v1:0").
         tokenizer (Optional[Callable], optional): The tokenizer to use for tokenizing the text. Defaults to get_tokenizer().
 
     Attributes:
-        splitter (SentenceSplitter): The sentence splitter to split the text into sentences.
+        splitter (TextSplitter): The sentence splitter to split the text into sentences.
         llm (LLM): The LLM model to use for the chunking.
         tokenizer (Optional[Callable]): The tokenizer to use for tokenizing the text.
     """
 
-    splitter: SentenceSplitter = Field(
+    splitter: TextSplitter = Field(
         default_factory=lambda: SentenceSplitter(chunk_size=50, chunk_overlap=0)
     )
     llm: LLM = Field(
@@ -166,7 +173,7 @@ class LLMSemanticChunker(TextSplitter, BaseModel):
 
     def __init__(
         self,
-        splitter: SentenceSplitter = None,
+        splitter: TextSplitter = None,
         llm: LLM = None,
         tokenizer: Optional[Callable] = None,
     ):

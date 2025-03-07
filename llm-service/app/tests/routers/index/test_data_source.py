@@ -96,7 +96,7 @@ class TestDocumentIndexing:
 
         response = client.get(f"/data_sources/{data_source_id}/size")
         assert response.status_code == 200
-        # size1 = response.json()
+        size1 = response.json()
 
         response = client.post(
             f"/data_sources/{data_source_id}/documents/{document_id}/index",
@@ -108,9 +108,9 @@ class TestDocumentIndexing:
 
         response = client.get(f"/data_sources/{data_source_id}/size")
         assert response.status_code == 200
-        # size2 = response.json()
+        size2 = response.json()
 
-        # assert size2 == size1
+        assert size2 == size1
 
     @staticmethod
     def test_delete_data_source(

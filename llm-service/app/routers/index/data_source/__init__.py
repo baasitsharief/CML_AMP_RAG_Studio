@@ -161,7 +161,20 @@ class DataSourceController:
                 llm = models.LLM.get(datasource.summarization_model)
             indexer = EmbeddingIndexer(
                 datasource.id,
-                splitter=LLMSemanticChunker(),
+                splitter=ClusterSemanticChunker(
+                    splitter=TokenTextSplitter(  # Recursive Token Text Splitter parameters from
+                        # https://github.com/brandonstarxel/chunking_evaluation/blob/main/chunking_evaluation/chunking/recursive_token_chunker.py
+                        chunk_size=64,
+                        chunk_overlap=0,
+                        separator="",
+                        backup_separators=[" ", "!", "?", ".", "\n", "\n\n"],
+                    ),
+                    embedding_function=models.Embedding.get(
+                        datasource.embedding_model
+                    ).get_text_embedding_batch,
+                    max_chunk_size=request.configuration.chunk_size,
+                    min_chunk_size=64,
+                ),
                 embedding_model=models.Embedding.get(datasource.embedding_model),
                 llm=llm,
                 chunks_vector_store=self.chunks_vector_store,
