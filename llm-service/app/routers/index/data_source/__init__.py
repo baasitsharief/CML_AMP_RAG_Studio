@@ -41,7 +41,7 @@ from pydantic import BaseModel
 from .... import exceptions
 from ....ai.indexing.base import NotSupportedFileExtensionError
 from ....ai.indexing.embedding_indexer import EmbeddingIndexer
-from ....ai.indexing.parser.chunker import ClusterSemanticChunker
+from ....ai.indexing.parser.chunker import ClusterSemanticChunker, LLMSemanticChunker
 from ....ai.indexing.summary_indexer import SummaryIndexer
 from ....ai.vector_stores.qdrant import QdrantVectorStore
 from ....ai.vector_stores.vector_store import VectorStore
@@ -161,11 +161,7 @@ class DataSourceController:
                 llm = models.LLM.get(datasource.summarization_model)
             indexer = EmbeddingIndexer(
                 datasource.id,
-                splitter=ClusterSemanticChunker(
-                    embedding_function=models.Embedding.get(
-                        datasource.embedding_model
-                    ).get_text_embedding_batch,
-                ),
+                splitter=LLMSemanticChunker(),
                 embedding_model=models.Embedding.get(datasource.embedding_model),
                 llm=llm,
                 chunks_vector_store=self.chunks_vector_store,

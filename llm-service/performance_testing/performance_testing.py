@@ -75,7 +75,9 @@ def main():
     with open(
         os.path.abspath(os.path.join(os.path.dirname(__file__), "raw_results.csv")), "a"
     ) as details:
-        details.write("timestamp,chunk_size,hyde,summarization_model,reranking_model,top_k,file_name_1,max_score,relevance,faithfulness,question\n")
+        details.write(
+            "timestamp,chunk_size,hyde,summarization_model,reranking_model,top_k,file_name_1,max_score,relevance,faithfulness,question\n"
+        )
         for config in [
             dict(zip(test_runtime_config.keys(), values))
             for values in itertools.product(*test_runtime_config.values())
