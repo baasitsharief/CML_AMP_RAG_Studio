@@ -8,19 +8,28 @@ This has minor changes to the original code to make it work with the LlamaIndex.
 import re
 from typing import Callable, List, Optional, Any
 from tqdm import tqdm
-
+import tiktoken
 from pydantic import BaseModel, Field
 import numpy as np
 from llama_index.core.node_parser import (
     SentenceSplitter,
     TextSplitter,
+    LangchainNodeParser,
 )
 from llama_index.llms.bedrock_converse import BedrockConverse
 from llama_index.embeddings.bedrock import BedrockEmbedding
 from llama_index.core.utils import get_tokenizer
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from ....services.models import LLM
+
+
+def openai_token_count(string: str) -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.get_encoding("cl100k_base")
+    num_tokens = len(encoding.encode(string, disallowed_special=()))
+    return num_tokens
 
 
 class ClusterSemanticChunker(TextSplitter, BaseModel):
@@ -40,7 +49,11 @@ class ClusterSemanticChunker(TextSplitter, BaseModel):
     """
 
     splitter: TextSplitter = Field(
-        default_factory=lambda: SentenceSplitter(chunk_size=64, chunk_overlap=0)
+        default_factory=lambda: LangchainNodeParser(
+            lc_splitter=RecursiveCharacterTextSplitter(
+                separators=["\n\n", "\n", ".", "?", "!", " ", ""],
+            )
+        )
     )
     _chunk_size: int = 512
     max_cluster: int = Field(default_factory=lambda: 512 // 64)
@@ -145,6 +158,268 @@ class ClusterSemanticChunker(TextSplitter, BaseModel):
         docs = [" ".join(sentences[start : end + 1]) for start, end in clusters]
 
         return docs
+
+
+class LangChainClusterSemanticChunker(ClusterSemanticChunker):
+    """
+    ClusterSemanticChunker with LangchainNodeParser as the splitter.
+    """
+
+    splitter: TextSplitter = Field(
+        default_factory=lambda: LangchainNodeParser(
+            lc_splitter=RecursiveCharacterTextSplitter(
+                separators=["\n\n", "\n", ".", "?", "!", " ", ""],
+                chunk_size=64,
+                chunk_overlap=0,
+                length_function=openai_token_count,
+            )
+        )
+    )
+    _chunk_size: int = 512
+    max_cluster: int = Field(default_factory=lambda: 512 // 64)
+    embedding_function: Optional[Any] = Field(
+        default_factory=lambda: BedrockEmbedding(
+            model_name="cohere.embed-english-v3"
+        ).get_text_embedding_batch
+    )
+
+    def __init__(
+        self,
+        splitter=None,
+        embedding_function=None,
+        max_chunk_size=512,
+        min_chunk_size=64,
+    ):
+        super().__init__(
+            splitter=splitter
+            or LangchainNodeParser(
+                lc_splitter=RecursiveCharacterTextSplitter(
+                    separators=["\n\n", "\n", ".", "?", "!", " ", ""],
+                    chunk_size=min_chunk_size,
+                    chunk_overlap=0,
+                    length_function=openai_token_count,
+                )
+            ),
+            embedding_function=embedding_function
+            or BedrockEmbedding(
+                model_name="cohere.embed-english-v3"
+            ).get_text_embedding_batch,
+            max_chunk_size=max_chunk_size,
+            min_chunk_size=min_chunk_size,
+        )
+
+
+class LangChainModifiedKamradtChunker(TextSplitter, BaseModel):
+    """
+    A modified version of the Kamradt Chunker that splits text into chunks based on semantic similarity with an average chunk size to add more consistency.
+
+    Args:
+        avg_chunk_size (int, optional): The desired average chunk size in tokens. Defaults to 400.
+        min_chunk_size (int, optional): The minimum chunk size in tokens. Defaults to 50.
+        embedding_function (EmbeddingFunction[Embeddable], optional): A function to obtain embeddings for text. Defaults to OpenAI's embedding function if not provided.
+        length_function (function, optional): A function to calculate token length of a text. Defaults to `openai_token_count`.
+
+    Attributes:
+        splitter (TextSplitter): The sentence splitter to split the text into sentences.
+        avg_chunk_size (int): The desired average chunk size in tokens.
+        min_chunk_size (int): The minimum chunk size in tokens.
+        embedding_function (EmbeddingFunction[Embeddable]): A function to obtain embeddings for text.
+        length_function (function): A function to calculate token length of a text.
+    """
+
+    avg_chunk_size: int = 400
+    min_chunk_size: int = 50
+    embedding_function: Optional[Any] = Field(
+        default_factory=lambda: BedrockEmbedding(
+            model_name="cohere.embed-english-v3"
+        ).get_text_embedding_batch
+    )
+    length_function: Optional[Callable] = Field(default_factory=openai_token_count)
+
+    def __init__(
+        self,
+        avg_chunk_size=400,
+        min_chunk_size=50,
+        embedding_function=None,
+        length_function=openai_token_count,
+    ):
+        """
+        Initializes the KamradtModifiedChunker with the specified parameters.
+
+        Args:
+            avg_chunk_size (int, optional): The desired average chunk size in tokens. Defaults to 400.
+            min_chunk_size (int, optional): The minimum chunk size in tokens. Defaults to 50.
+            embedding_function (EmbeddingFunction[Embeddable], optional): A function to obtain embeddings for text. Defaults to OpenAI's embedding function if not provided.
+            length_function (function, optional): A function to calculate token length of a text. Defaults to `openai_token_count`.
+        """
+        super().__init__()
+        self.splitter = LangchainNodeParser(
+            lc_splitter=RecursiveCharacterTextSplitter(
+                separators=["\n\n", "\n", ".", "?", "!", " ", ""],
+                chunk_size=min_chunk_size,
+                chunk_overlap=0,
+                length_function=length_function,
+            )
+        )
+
+        self.avg_chunk_size = avg_chunk_size
+        if embedding_function is None:
+            embedding_function = (
+                embedding_function
+                or BedrockEmbedding(
+                    model_name="cohere.embed-english-v3"
+                ).get_text_embedding_batch
+            )
+        self.embedding_function = embedding_function
+        self.length_function = length_function
+
+    def combine_sentences(self, sentences, buffer_size=1):
+        # Go through each sentence dict
+        for i in range(len(sentences)):
+
+            # Create a string that will hold the sentences which are joined
+            combined_sentence = ""
+
+            # Add sentences before the current one, based on the buffer size.
+            for j in range(i - buffer_size, i):
+                # Check if the index j is not negative (to avoid index out of range like on the first one)
+                if j >= 0:
+                    # Add the sentence at index j to the combined_sentence string
+                    combined_sentence += sentences[j]["sentence"] + " "
+
+            # Add the current sentence
+            combined_sentence += sentences[i]["sentence"]
+
+            # Add sentences after the current one, based on the buffer size
+            for j in range(i + 1, i + 1 + buffer_size):
+                # Check if the index j is within the range of the sentences list
+                if j < len(sentences):
+                    # Add the sentence at index j to the combined_sentence string
+                    combined_sentence += " " + sentences[j]["sentence"]
+
+            # Then add the whole thing to your dict
+            # Store the combined sentence in the current sentence dict
+            sentences[i]["combined_sentence"] = combined_sentence
+
+        return sentences
+
+    def calculate_cosine_distances(self, sentences):
+        BATCH_SIZE = 500
+        distances = []
+        embedding_matrix = None
+        for i in range(0, len(sentences), BATCH_SIZE):
+            batch_sentences = sentences[i : i + BATCH_SIZE]
+            batch_sentences = [
+                sentence["combined_sentence"] for sentence in batch_sentences
+            ]
+            embeddings = self.embedding_function(batch_sentences)
+
+            # Convert embeddings list of lists to numpy array
+            batch_embedding_matrix = np.array(embeddings)
+
+            # Append the batch embedding matrix to the main embedding matrix
+            if embedding_matrix is None:
+                embedding_matrix = batch_embedding_matrix
+            else:
+                embedding_matrix = np.concatenate(
+                    (embedding_matrix, batch_embedding_matrix), axis=0
+                )
+
+        # Normalize each vector to be a unit vector
+        norms = np.linalg.norm(embedding_matrix, axis=1, keepdims=True)
+        embedding_matrix = embedding_matrix / norms
+
+        similarity_matrix = np.dot(embedding_matrix, embedding_matrix.T)
+
+        for i in range(len(sentences) - 1):
+            # Calculate cosine similarity
+            similarity = similarity_matrix[i, i + 1]
+
+            # Convert to cosine distance
+            distance = 1 - similarity
+
+            # Append cosine distance to the list
+            distances.append(distance)
+
+            # Store distance in the dictionary
+            sentences[i]["distance_to_next"] = distance
+
+        # Optionally handle the last sentence
+        # sentences[-1]['distance_to_next'] = None  # or a default value
+
+        return distances, sentences
+
+    def split_text(self, text):
+        """
+        Splits the input text into chunks of approximately the specified average size based on semantic similarity.
+
+        Args:
+            text (str): The input text to be split into chunks.
+
+        Returns:
+            list of str: The list of text chunks.
+        """
+
+        sentences_strips = self.splitter.split_text(text)
+
+        sentences = [
+            {"sentence": x, "index": i} for i, x in enumerate(sentences_strips)
+        ]
+
+        sentences = self.combine_sentences(sentences, 3)
+
+        distances, sentences = self.calculate_cosine_distances(sentences)
+
+        total_tokens = sum(
+            self.length_function(sentence["sentence"]) for sentence in sentences
+        )
+        avg_chunk_size = self.avg_chunk_size
+        number_of_cuts = total_tokens // avg_chunk_size
+
+        # Define threshold limits
+        lower_limit = 0.0
+        upper_limit = 1.0
+
+        # Convert distances to numpy array
+        distances_np = np.array(distances)
+
+        # Binary search for threshold
+        while upper_limit - lower_limit > 1e-6:
+            threshold = (upper_limit + lower_limit) / 2.0
+            num_points_above_threshold = np.sum(distances_np > threshold)
+
+            if num_points_above_threshold > number_of_cuts:
+                lower_limit = threshold
+            else:
+                upper_limit = threshold
+
+        indices_above_thresh = [i for i, x in enumerate(distances) if x > threshold]
+
+        # Initialize the start index
+        start_index = 0
+
+        # Create a list to hold the grouped sentences
+        chunks = []
+
+        # Iterate through the breakpoints to slice the sentences
+        for index in indices_above_thresh:
+            # The end index is the current breakpoint
+            end_index = index
+
+            # Slice the sentence_dicts from the current start index to the end index
+            group = sentences[start_index : end_index + 1]
+            combined_text = " ".join([d["sentence"] for d in group])
+            chunks.append(combined_text)
+
+            # Update the start index for the next group
+            start_index = index + 1
+
+        # The last group, if any sentences remain
+        if start_index < len(sentences):
+            combined_text = " ".join([d["sentence"] for d in sentences[start_index:]])
+            chunks.append(combined_text)
+
+        return chunks
 
 
 # Very iffy on this one. It might or might not improve results

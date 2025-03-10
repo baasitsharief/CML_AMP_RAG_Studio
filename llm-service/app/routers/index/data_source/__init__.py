@@ -166,8 +166,8 @@ class DataSourceController:
                         # https://github.com/brandonstarxel/chunking_evaluation/blob/main/chunking_evaluation/chunking/recursive_token_chunker.py
                         chunk_size=64,
                         chunk_overlap=0,
-                        separator="",
-                        backup_separators=[" ", "!", "?", ".", "\n", "\n\n"],
+                        separator=" ",
+                        backup_separators=["!", "?", ".", "\n", "\n\n"],
                     ),
                     embedding_function=models.Embedding.get(
                         datasource.embedding_model
