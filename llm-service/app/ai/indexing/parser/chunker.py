@@ -49,11 +49,7 @@ class ClusterSemanticChunker(TextSplitter, BaseModel):
     """
 
     splitter: TextSplitter = Field(
-        default_factory=lambda: LangchainNodeParser(
-            lc_splitter=RecursiveCharacterTextSplitter(
-                separators=["\n\n", "\n", ".", "?", "!", " ", ""],
-            )
-        )
+        default_factory=lambda: SentenceSplitter(chunk_size=64, chunk_overlap=0)
     )
     _chunk_size: int = 512
     max_cluster: int = Field(default_factory=lambda: 512 // 64)
@@ -227,6 +223,16 @@ class LangChainModifiedKamradtChunker(TextSplitter, BaseModel):
         length_function (function): A function to calculate token length of a text.
     """
 
+    splitter: TextSplitter = Field(
+        default_factory=lambda: LangchainNodeParser(
+            lc_splitter=RecursiveCharacterTextSplitter(
+                separators=["\n\n", "\n", ".", "?", "!", " ", ""],
+                chunk_size=50,
+                chunk_overlap=0,
+                length_function=openai_token_count,
+            )
+        )
+    )
     avg_chunk_size: int = 400
     min_chunk_size: int = 50
     embedding_function: Optional[Any] = Field(
@@ -234,14 +240,16 @@ class LangChainModifiedKamradtChunker(TextSplitter, BaseModel):
             model_name="cohere.embed-english-v3"
         ).get_text_embedding_batch
     )
-    length_function: Optional[Callable] = Field(default_factory=openai_token_count)
+    length_function: Optional[Callable] = Field(
+        default_factory=lambda: openai_token_count
+    )
 
     def __init__(
         self,
         avg_chunk_size=400,
         min_chunk_size=50,
         embedding_function=None,
-        length_function=openai_token_count,
+        length_function=None,
     ):
         """
         Initializes the KamradtModifiedChunker with the specified parameters.
@@ -258,7 +266,7 @@ class LangChainModifiedKamradtChunker(TextSplitter, BaseModel):
                 separators=["\n\n", "\n", ".", "?", "!", " ", ""],
                 chunk_size=min_chunk_size,
                 chunk_overlap=0,
-                length_function=length_function,
+                length_function=length_function or openai_token_count,
             )
         )
 
@@ -271,7 +279,7 @@ class LangChainModifiedKamradtChunker(TextSplitter, BaseModel):
                 ).get_text_embedding_batch
             )
         self.embedding_function = embedding_function
-        self.length_function = length_function
+        self.length_function = length_function or openai_token_count
 
     def combine_sentences(self, sentences, buffer_size=1):
         # Go through each sentence dict

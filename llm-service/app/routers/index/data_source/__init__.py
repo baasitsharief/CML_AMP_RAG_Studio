@@ -35,13 +35,22 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi_utils.cbv import cbv
 from llama_index.core.llms import LLM
-from llama_index.core.node_parser import TokenTextSplitter, SentenceSplitter
+from llama_index.core.node_parser import (
+    TokenTextSplitter,
+    SentenceSplitter,
+    LangchainNodeParser,
+)
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel
 
 from .... import exceptions
 from ....ai.indexing.base import NotSupportedFileExtensionError
 from ....ai.indexing.embedding_indexer import EmbeddingIndexer
-from ....ai.indexing.parser.chunker import ClusterSemanticChunker, LLMSemanticChunker
+from ....ai.indexing.parser.chunker import (
+    LangChainClusterSemanticChunker,
+    LangChainModifiedKamradtChunker,
+    openai_token_count,
+)
 from ....ai.indexing.summary_indexer import SummaryIndexer
 from ....ai.vector_stores.qdrant import QdrantVectorStore
 from ....ai.vector_stores.vector_store import VectorStore
@@ -161,19 +170,13 @@ class DataSourceController:
                 llm = models.LLM.get(datasource.summarization_model)
             indexer = EmbeddingIndexer(
                 datasource.id,
-                splitter=ClusterSemanticChunker(
-                    splitter=TokenTextSplitter(  # Recursive Token Text Splitter parameters from
-                        # https://github.com/brandonstarxel/chunking_evaluation/blob/main/chunking_evaluation/chunking/recursive_token_chunker.py
-                        chunk_size=64,
-                        chunk_overlap=0,
-                        separator=" ",
-                        backup_separators=["!", "?", ".", "\n", "\n\n"],
+                splitter=LangchainNodeParser(
+                    lc_splitter=RecursiveCharacterTextSplitter(
+                        separators=["\n\n", "\n", ".", "?", "!", " ", ""],
+                        length_function=openai_token_count,
+                        chunk_size=request.configuration.chunk_size,
+                        chunk_overlap=request.configuration.chunk_overlap,
                     ),
-                    embedding_function=models.Embedding.get(
-                        datasource.embedding_model
-                    ).get_text_embedding_batch,
-                    max_chunk_size=request.configuration.chunk_size,
-                    min_chunk_size=64,
                 ),
                 embedding_model=models.Embedding.get(datasource.embedding_model),
                 llm=llm,
